@@ -1,0 +1,82 @@
+import boto3
+import json
+import pymysql
+
+# 데이터베이스 연결 정보
+db_host = 'your host'
+db_name = 'your db name'
+db_user = 'your username'
+db_password = 'your password'
+db_port = 3306
+
+# RDS 연결
+def connect_to_db():
+    try:
+        conn = pymysql.connect(host=db_host, user=db_user, passwd=db_password, db=db_name, connect_timeout=5)
+    except Exception as e:
+        print("Unable to connect to the database")
+        print(e)
+        return None
+    return conn
+
+# 이벤트 삭제 함수
+def delete_event(eventid):
+    conn = connect_to_db()
+    if conn is None:
+        return {
+            "statusCode": 500,
+            "body": json.dumps({"message": "Unable to connect to the database."})
+        }
+
+    cursor = conn.cursor()
+    
+    # 이벤트 ID를 통해 tb_event에서 해당 이벤트 존재 확인
+    query = "SELECT event_id FROM tb_event WHERE event_id=%s"
+    cursor.execute(query, (eventid,))
+    result = cursor.fetchone()
+
+    # 해당 이벤트가 존재하지 않으면 함수 종료
+    if result is None:
+        return {
+            "statusCode": 404,
+            "body": json.dumps({"message": "The event with the given ID does not exist."})
+        }
+
+    # 이벤트와 관련된 정보를 삭제하기 전에 권한 확인
+    query = "SELECT user_id FROM tb_host WHERE event_id=%s"
+    cursor.execute(query, (eventid,))
+    result = cursor.fetchone()
+
+    # 권한이 없으면 None을 반환하고 함수 종료
+    if result is None or result[0] != 'kimewha':
+        return {
+            "statusCode": 403,
+            "body": json.dumps({"message": "You are not authorized to delete this event."})
+        }
+
+    # 권한이 있는 경우, tb_host와 tb_event에서 해당 이벤트 삭제
+    query = "DELETE FROM tb_host WHERE event_id=%s"
+    cursor.execute(query, (eventid,))
+    query = "DELETE FROM tb_event WHERE event_id=%s"
+    cursor.execute(query, (eventid,))
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    # 이벤트 ID 반환
+    return {
+        "statusCode": 200,
+        "body": json.dumps({"event_id": eventid})
+    }
+
+
+# Lambda 함수
+def lambda_handler(event, context):
+    # 이벤트 ID 가져오기
+    eventid = event["queryStringParameters"].get("eventid")
+    # 이벤트 삭제
+    result = delete_event(eventid)
+
+    # 결과 반환
+    return result
