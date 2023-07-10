@@ -1,1 +1,1 @@
-# cloud-ticket-serverless
+# eventicket-serverless
